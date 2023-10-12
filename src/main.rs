@@ -16,12 +16,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let ctx = Context::new(env::args().collect());
 
     let handler = match ctx.problem.as_deref() {
-        None => no_problem_specified,
+        None => handle_no_problem_specified,
         Some("help") => match ctx.problem_arguments.get(0) {
-            None => basic_help,
-            Some(problem) => get_problem_help(problem).unwrap_or(help_for_unknown_problem),
+            None => handle_basic_help,
+            Some(problem) => get_problem_help(problem).unwrap_or(handle_help_for_unknown_problem),
         },
-        Some(problem) => get_problem_handler(problem).unwrap_or(problem_not_found),
+        Some(problem) => get_problem_handler(problem).unwrap_or(handle_problem_not_found),
     };
 
     handler(&ctx)
@@ -35,17 +35,17 @@ fn print_available_problems(ctx: &Context) {
     }
 }
 
-fn no_problem_specified(ctx: &Context) -> Result<(), Box<dyn Error>> {
+fn handle_no_problem_specified(ctx: &Context) -> Result<(), Box<dyn Error>> {
     print_available_problems(ctx);
     Err(String::from("No problem specified.").into())
 }
 
-fn basic_help(ctx: &Context) -> Result<(), Box<dyn Error>> {
+fn handle_basic_help(ctx: &Context) -> Result<(), Box<dyn Error>> {
     print_available_problems(ctx);
     Ok(())
 }
 
-fn help_for_unknown_problem(ctx: &Context) -> Result<(), Box<dyn Error>> {
+fn handle_help_for_unknown_problem(ctx: &Context) -> Result<(), Box<dyn Error>> {
     print_available_problems(ctx);
     Err(format!(
         "Problem '{}' not found.",
@@ -56,7 +56,7 @@ fn help_for_unknown_problem(ctx: &Context) -> Result<(), Box<dyn Error>> {
     .into())
 }
 
-fn problem_not_found(ctx: &Context) -> Result<(), Box<dyn Error>> {
+fn handle_problem_not_found(ctx: &Context) -> Result<(), Box<dyn Error>> {
     print_available_problems(ctx);
     Err(format!(
         "Problem '{}' not found.",
