@@ -11,7 +11,7 @@ pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
 }
 
 fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Box<dyn Error>> {
-    let mut buffer = [0; 1];
+    let mut buffer = [0; 1024];
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => break Ok(()), // EOF,
