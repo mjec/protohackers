@@ -4,10 +4,11 @@ pub(crate) struct Context {
     pub(crate) program_name: String,
     pub(crate) problem: Option<String>,
     pub(crate) problem_arguments: VecDeque<String>,
+    pub(crate) bind_address: String,
 }
 
 impl Context {
-    pub(crate) fn new(mut args: VecDeque<String>) -> Self {
+    pub(crate) fn new(mut args: VecDeque<String>, bind_address: String) -> Self {
         let program_name = args.pop_front().expect("We expect argv[0]");
         let problem = args.pop_front();
         let problem_arguments = args;
@@ -15,6 +16,7 @@ impl Context {
             program_name,
             problem,
             problem_arguments,
+            bind_address,
         }
     }
 }

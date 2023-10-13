@@ -1,6 +1,7 @@
+mod logger;
 #[macro_use]
 mod scaffolding;
-mod logger;
+mod server;
 
 use std::env;
 use std::error::Error;
@@ -13,7 +14,10 @@ problem_list! {
 
 fn main() -> Result<(), Box<dyn Error>> {
     logger::init()?;
-    let ctx = Context::new(env::args().collect());
+    let ctx = Context::new(
+        env::args().collect(),
+        env::var("BIND_ADDRESS").unwrap_or(String::from("127.0.0.1:0")),
+    );
 
     let handler = match ctx.problem.as_deref() {
         None => handle_no_problem_specified,

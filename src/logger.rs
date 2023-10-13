@@ -1,18 +1,16 @@
-use std::sync::Mutex;
+use std::{error::Error, sync::Mutex, thread};
 
 use log::{Level, Metadata, Record};
 
-pub(crate) fn init() -> Result<(), log::SetLoggerError> {
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(log::LevelFilter::Info))?;
+pub(crate) fn init() -> Result<(), Box<dyn Error>> {
+    log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Info))?;
 
-    std::thread::spawn(|| {
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(LOG_AUTO_FLUSH_INTERVAL_MS));
+    thread::Builder::new()
+        .name("log-auto-flush".to_string())
+        .spawn(|| loop {
+            thread::sleep(std::time::Duration::from_millis(LOG_AUTO_FLUSH_INTERVAL_MS));
             log::logger().flush();
-        }
-    });
-
+        })?;
     Ok(())
 }
 
@@ -32,7 +30,10 @@ impl log::Log for BufferedStderrLogger {
         if self.enabled(record.metadata()) {
             let mut result = format!("[{}] {}", record.level(), record.args());
             let mut collector = KVCollector::new();
-            record.key_values().visit(&mut collector).expect("KVCollector cannot fail");
+            record
+                .key_values()
+                .visit(&mut collector)
+                .expect("KVCollector cannot fail");
             result.push_str(collector.result.as_str());
             LOG_BUFFER.lock().unwrap().push(result);
         }
@@ -59,7 +60,11 @@ impl KVCollector {
 }
 
 impl<'kvs> log::kv::Visitor<'kvs> for KVCollector {
-    fn visit_pair(&mut self, key: log::kv::Key<'kvs>, value: log::kv::Value<'kvs>) -> Result<(), log::kv::Error> {
+    fn visit_pair(
+        &mut self,
+        key: log::kv::Key<'kvs>,
+        value: log::kv::Value<'kvs>,
+    ) -> Result<(), log::kv::Error> {
         self.result.push(' ');
         self.result.push_str(key.as_str());
         self.result.push('=');
