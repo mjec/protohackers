@@ -10,6 +10,7 @@ use scaffolding::Context;
 
 problem_list! {
     smoke_test
+    prime_time
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
