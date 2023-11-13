@@ -1,6 +1,6 @@
 use crate::{scaffolding::Context, server};
 use std::error::Error;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Cursor, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 
 pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
@@ -11,25 +11,23 @@ pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
 }
 
 fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Box<dyn Error>> {
-    let mut buffer = [0; 1024];
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => break Ok(()), // EOF,
-            Ok(bytes_read) => match stream.write(&buffer[..bytes_read]) {
-                Ok(bytes_written) if bytes_written != bytes_read => Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    format!(
-                        "Wrote {} bytes, but read {} bytes",
-                        bytes_written, bytes_read
-                    ),
-                )),
-                Ok(_) => Ok(()),
-                Err(e) if e.kind() == ErrorKind::Interrupted => Ok(()),
-                Err(e) => Err(e),
-            },
+    let mut reader = BufReader::new(stream);
+    let mut writer = Cursor::new(Vec::<u8>::new());
+
+    for line in reader.by_ref().lines() {
+        match line {
+            Ok(val) => {
+                write!(writer, "{}", &val)
+            }
             Err(e) if e.kind() == ErrorKind::Interrupted => Ok(()),
             Err(e) => Err(e),
         }?
+    }
+
+    match reader.into_inner().write_all(writer.get_ref()) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == ErrorKind::Interrupted => Ok(()),
+        Err(e) => Err(Box::new(e)),
     }
 }
 
