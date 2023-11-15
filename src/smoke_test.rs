@@ -18,11 +18,7 @@ fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Bo
     loop {
         match reader.read(&mut buffer) {
             Ok(0) => break Ok(()), // EOF
-            Ok(bytes_read) => match writer.write_all(&buffer[..bytes_read]) {
-                Ok(_) => Ok(()),
-                Err(e) if e.kind() == ErrorKind::Interrupted => Ok(()),
-                Err(e) => Err(e),
-            },
+            Ok(bytes_read) => writer.write_all(&buffer[..bytes_read]),
             Err(e) if e.kind() == ErrorKind::Interrupted => Ok(()),
             Err(e) => Err(e),
         }?
