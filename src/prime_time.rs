@@ -69,7 +69,6 @@ pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
 
 fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Box<dyn Error>> {
     let reader = BufReader::new(stream.try_clone()?);
-    let mut writer = BufWriter::new(stream.try_clone()?);
 
     for line in reader.lines() {
         let line = line?;
@@ -88,10 +87,9 @@ fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Bo
             };
             let mut response = serde_json::to_vec(&response)?;
             response.push(b'\n');
-            writer.write_all(&response)?;
-            writer.flush()?;
+            stream.write_all(&response)?;
         } else {
-            writer.write_all(b"kthxbai\n")?;
+            stream.write_all(b"kthxbai\n")?;
             return Ok(());
         }
     }
@@ -107,6 +105,11 @@ fn is_prime(number: i64) -> bool {
     } else if number % 2 == 0 {
         false
     } else {
+        // We now only have odd numbers greater than two to check.
+        // So take every number between 3 and the square root of the number
+        // (inclusive), and check if the number is divisible by it.
+        // Step by two, because we already know this number isn't divisible
+        // by 2, so any newfound divisor must be odd.
         !(3..=((number as f64).sqrt() as i64))
             .step_by(2)
             .any(|n| number % n == 0)
