@@ -47,6 +47,7 @@ fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Bo
                 }
                 _ => return Ok(()), // disconnect
             },
+            Err(e) if e.kind() == ErrorKind::UnexpectedEof => break Ok(()), // we didn't get 9 bytes, so disconnect
             Err(e) if e.kind() == ErrorKind::Interrupted => Ok(()),
             Err(e) => Err(e),
         }?
