@@ -11,6 +11,7 @@ use scaffolding::Context;
 problem_list! {
     smoke_test
     prime_time
+    means_to_an_end
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
