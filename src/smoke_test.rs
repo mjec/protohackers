@@ -1,6 +1,6 @@
 use crate::{scaffolding::Context, server};
 use std::error::Error;
-use std::io::{BufReader, BufWriter, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 
 pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {

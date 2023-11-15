@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{scaffolding::Context, server};
 use std::error::Error;
 use std::fmt::Display;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
 
 #[derive(Debug)]
