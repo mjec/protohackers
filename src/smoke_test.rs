@@ -26,6 +26,6 @@ fn handle(stream: &mut TcpStream, _remote_address: &SocketAddr) -> Result<(), Bo
 }
 
 pub(crate) fn help(ctx: &Context) -> Result<(), Box<dyn Error>> {
-    println!("Usage: {}", ctx.program_name);
+    println!("Usage: {} smoke_test", ctx.program_name);
     Ok(())
 }

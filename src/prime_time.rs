@@ -114,6 +114,6 @@ fn is_prime(number: i64) -> bool {
 }
 
 pub(crate) fn help(ctx: &Context) -> Result<(), Box<dyn Error>> {
-    println!("Usage: {}", ctx.program_name);
+    println!("Usage: {} prime_time", ctx.program_name);
     Ok(())
 }
