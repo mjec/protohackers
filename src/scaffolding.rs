@@ -22,9 +22,8 @@ impl Context {
 }
 
 /// Generate boilerplate for each problem, permitting dispatch between them.
-/// Requires a size equal to the number of problems, followed by a whitespace-
-/// separated list of problems. Each problem must have a module of the same
-/// name, which should NOT have a `mod` statement otherwise.
+/// Requires a whitespace-separated list of problems. Each problem must have
+/// a module of the same name, which should NOT have a `mod` statement otherwise.
 ///
 /// Each module must have two functions with the following signatures:
 ///
