@@ -1,9 +1,14 @@
 use std::{error::Error, sync::Mutex, thread};
 
-use log::{Level, Metadata, Record};
+use log::{Metadata, Record};
 
 pub(crate) fn init() -> Result<(), Box<dyn Error>> {
-    log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Info))?;
+    log::set_logger(&LOGGER)?;
+    if std::env::var("DEBUG").is_ok() {
+        log::set_max_level(log::LevelFilter::Debug);
+    } else {
+        log::set_max_level(log::LevelFilter::Info);
+    }
 
     thread::Builder::new()
         .name("log-auto-flush".to_string())
@@ -23,7 +28,7 @@ static LOG_BUFFER: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 impl log::Log for BufferedStderrLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info
+        metadata.level() <= log::max_level()
     }
 
     fn log(&self, record: &Record) {

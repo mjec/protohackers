@@ -12,6 +12,7 @@ problem_list! {
     smoke_test
     prime_time
     means_to_an_end
+    budget_chat
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
