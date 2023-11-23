@@ -251,15 +251,14 @@ impl Server for TcpServer {
 
 impl Server for UdpServer {
     type Listener = UdpSocket;
-    type Stream = Vec<u8>;
+    type Stream = UdpSocket;
 
     fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener> {
         Self::Listener::bind(bind_address)
     }
 
     fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream> {
-        let mut buffer: Vec<u8> = Vec::new();
-        listener.recv(&mut buffer).map(|_| buffer)
+        listener.try_clone()
     }
 
     fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
