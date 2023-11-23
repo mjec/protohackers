@@ -1,11 +1,12 @@
 use crate::{scaffolding::Context, server};
+use server::{Server as _, TcpServer};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 
 pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
-    let shutdown_signal = server::serve(ctx, handle)?;
+    let shutdown_signal = TcpServer::new().serve(ctx, handle)?;
     shutdown_signal.set_as_ctrl_c_handler()?;
     shutdown_signal.sleep_until_shutdown();
     Ok(())

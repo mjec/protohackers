@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{scaffolding::Context, server};
+use server::{Server as _, TcpServer};
 use std::error::Error;
 use std::fmt::Display;
 use std::io::{BufRead, BufReader, Write};
@@ -61,7 +62,7 @@ struct Response {
 }
 
 pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
-    let shutdown_signal = server::serve(ctx, handle)?;
+    let shutdown_signal = TcpServer::new().serve(ctx, handle)?;
     shutdown_signal.set_as_ctrl_c_handler()?;
     shutdown_signal.sleep_until_shutdown();
     Ok(())

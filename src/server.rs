@@ -1,7 +1,8 @@
 use std::{
     cmp::max,
     error::Error,
-    net::{SocketAddr, TcpStream},
+    io,
+    net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket},
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc, Arc, OnceLock,
@@ -17,7 +18,7 @@ use crate::scaffolding::Context;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const SLEEP_DURATION: Duration = Duration::from_millis(500);
 
-type Handler = fn(&mut TcpStream, &SocketAddr) -> Result<(), Box<dyn Error>>;
+type Handler<T> = fn(&mut T, &SocketAddr) -> Result<(), Box<dyn Error>>;
 
 pub struct ShutdownSignal {
     once: Arc<OnceLock<OnceLock<()>>>,
@@ -90,117 +91,179 @@ impl Clone for ShutdownSignal {
     }
 }
 
-pub(crate) fn serve(ctx: &Context, handler: Handler) -> Result<ShutdownSignal, Box<dyn Error>> {
-    let active_threads = Arc::new(AtomicUsize::new(0));
-    let listener = std::net::TcpListener::bind(&ctx.bind_address)?;
-    let shutdown_signal = ShutdownSignal::new();
-    let mut shutdown_signal_clone = shutdown_signal.clone();
+pub(crate) trait Server {
+    type Listener: Send + 'static;
+    type Stream: Send + 'static;
 
-    log::info!(
-        address = as_display!(listener.local_addr()?),
-        pid = as_display!(std::process::id());
-        "Listening"
-    );
+    fn serve(
+        &self,
+        ctx: &Context,
+        handler: Handler<Self::Stream>,
+    ) -> Result<ShutdownSignal, Box<dyn Error>> {
+        let active_threads = Arc::new(AtomicUsize::new(0));
+        let listener = Self::get_listener(ctx.bind_address.as_str())?;
+        let shutdown_signal = ShutdownSignal::new();
+        let mut shutdown_signal_clone = shutdown_signal.clone();
+        let local_address = Self::get_address(&listener)?;
 
-    thread::Builder::new()
-        .name("server-controller".into())
-        .spawn(move || {
-        let (request_sender, request_receiver) = mpsc::channel::<(TcpStream, SocketAddr)>();
-
-        if thread::Builder::new()
-            .name("accept-and-forward".into())
-            .spawn(move || {
-                while let Ok((original_stream, original_remote_address)) = listener.accept() {
-                    if request_sender
-                        .send((original_stream, original_remote_address))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })
-            .is_err()
-        {
-            log::error!("Unable to spawn thread to accept connections");
-        }
-
-        while !shutdown_signal_clone.is_shutdown_initiated() {
-            match request_receiver.recv_timeout(SLEEP_DURATION) {
-                Ok((mut stream, remote_address)) => {
-                    log::info!(
-                        remote_address = as_display!(remote_address);
-                        "Got a connection"
-                    );
-                    let active_threads_clone = active_threads.clone();
-                    let request_id = format!(
-                        "{}-{}",
-                        remote_address.port(),
-                        match remote_address.ip() {
-                            std::net::IpAddr::V4(ipv4) => format!("{}", Into::<u32>::into(ipv4)),
-                            std::net::IpAddr::V6(ipv6) => format!("{}", Into::<u128>::into(ipv6)),
-                        }
-                    );
-                    let request_handler = move || {
-                        active_threads_clone.fetch_add(1, Ordering::SeqCst);
-                        if let Some(err) = handler(&mut stream, &remote_address).err() {
-                            log::error!(
-                                error = as_display!(err),
-                                other_threads = as_display!(active_threads_clone.fetch_sub(1, Ordering::SeqCst)),
-                                remote_address = as_display!(remote_address);
-                                "Request complete"
-                            );
-                        } else {
-                            log::info!(
-                                other_threads = as_display!(active_threads_clone.fetch_sub(1, Ordering::SeqCst)),
-                                remote_address = as_display!(remote_address);
-                                "Request complete"
-                            );
-                        }
-                    };
-                    if thread::Builder::new()
-                        .name(format!("request-handler-{}", request_id))
-                        .spawn(request_handler)
-                        .is_err()
-                    {
-                        log::error!(
-                            other_threads = as_display!(active_threads.fetch_sub(1, Ordering::SeqCst)),
-                            remote_address = as_display!(remote_address);
-                            "Unable to spawn thread to handle request"
-                        )
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => { }
-                Err(err) => {
-                    log::error!(
-                        error = as_display!(err);
-                        "Request receiver error, shutting down"
-                    );
-                    shutdown_signal_clone.start_shutdown();
-                }
-            }
-        }
-
-        // shutdown time!
-
-        let stop_at = Instant::now() + SHUTDOWN_TIMEOUT;
         log::info!(
-            shutdown_timeout = as_debug!(SHUTDOWN_TIMEOUT),
-            active_threads = as_display!(active_threads.load(Ordering::SeqCst));
-            "Shutdown signal received"
+            address = as_display!(local_address),
+            pid = as_display!(std::process::id());
+            "Listening"
         );
-        while Instant::now() < stop_at && active_threads.load(Ordering::SeqCst) > 0 {
-            std::thread::sleep(SLEEP_DURATION);
-        }
-        if active_threads.load(Ordering::SeqCst) > 0 {
-            log::warn!(
-                active_threads = as_display!(active_threads.load(Ordering::SeqCst)),
-                shutdown_timeout = as_debug!(SHUTDOWN_TIMEOUT),
-                reason = "shutdown timeout reached";
-                "Stopping controller despite active threads"
-            );
-        }
-        shutdown_signal_clone.complete_shutdown();
-    })?;
 
-    Ok(shutdown_signal)
+        thread::Builder::new()
+            .name("server-controller".into())
+            .spawn(move || {
+                let (request_sender, request_receiver) = mpsc::channel::<(Self::Stream, SocketAddr)>();
+                if thread::Builder::new()
+                    .name("accept-and-forward".into())
+                    .spawn(move || {
+                        while let Ok(stream) = Self::get_stream(&listener) {
+                            if request_sender.send((stream, local_address)).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                ).is_err() {
+                    log::error!("Unable to spawn thread to accept connections");
+                }
+
+                while !shutdown_signal_clone.is_shutdown_initiated() {
+                    match request_receiver.recv_timeout(SLEEP_DURATION) {
+                        Ok((mut stream, remote_address)) => {
+                            log::info!(
+                                remote_address = as_display!(remote_address);
+                                "Got a connection"
+                            );
+                            let active_threads_clone = active_threads.clone();
+                            let request_id = format!(
+                                "{}-{}",
+                                remote_address.port(),
+                                match remote_address.ip() {
+                                    std::net::IpAddr::V4(ipv4) => format!("{}", Into::<u32>::into(ipv4)),
+                                    std::net::IpAddr::V6(ipv6) => format!("{}", Into::<u128>::into(ipv6)),
+                                }
+                            );
+                            let request_handler = move || {
+                                active_threads_clone.fetch_add(1, Ordering::SeqCst);
+                                if let Some(err) = handler(&mut stream, &remote_address).err() {
+                                    log::error!(
+                                        error = as_display!(err),
+                                        other_threads = as_display!(active_threads_clone.fetch_sub(1, Ordering::SeqCst)),
+                                        remote_address = as_display!(remote_address);
+                                        "Request complete"
+                                    );
+                                } else {
+                                    log::info!(
+                                        other_threads = as_display!(active_threads_clone.fetch_sub(1, Ordering::SeqCst)),
+                                        remote_address = as_display!(remote_address);
+                                        "Request complete"
+                                    );
+                                }
+                            };
+                            if thread::Builder::new()
+                                .name(format!("request-handler-{}", request_id))
+                                .spawn(request_handler)
+                                .is_err()
+                            {
+                                log::error!(
+                                    other_threads = as_display!(active_threads.fetch_sub(1, Ordering::SeqCst)),
+                                    remote_address = as_display!(remote_address);
+                                    "Unable to spawn thread to handle request"
+                                )
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => { }
+                        Err(err) => {
+                            log::error!(
+                                error = as_display!(err);
+                                "Request receiver error, shutting down"
+                            );
+                            shutdown_signal_clone.start_shutdown();
+                        }
+                    }
+                }
+
+                // shutdown time!
+
+                let stop_at = Instant::now() + SHUTDOWN_TIMEOUT;
+                log::info!(
+                    shutdown_timeout = as_debug!(SHUTDOWN_TIMEOUT),
+                    active_threads = as_display!(active_threads.load(Ordering::SeqCst));
+                    "Shutdown signal received"
+                );
+                while Instant::now() < stop_at && active_threads.load(Ordering::SeqCst) > 0 {
+                    std::thread::sleep(SLEEP_DURATION);
+                }
+                if active_threads.load(Ordering::SeqCst) > 0 {
+                    log::warn!(
+                        active_threads = as_display!(active_threads.load(Ordering::SeqCst)),
+                        shutdown_timeout = as_debug!(SHUTDOWN_TIMEOUT),
+                        reason = "shutdown timeout reached";
+                        "Stopping controller despite active threads"
+                    );
+                }
+                shutdown_signal_clone.complete_shutdown();
+            })?;
+        Ok(shutdown_signal)
+    }
+
+    fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener>;
+
+    fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream>;
+
+    fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr>;
+}
+
+pub(crate) struct TcpServer();
+
+impl TcpServer {
+    pub(crate) fn new() -> Self {
+        Self {}
+    }
+}
+
+pub(crate) struct UdpServer();
+
+impl UdpServer {
+    pub(crate) fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Server for TcpServer {
+    type Listener = TcpListener;
+    type Stream = TcpStream;
+
+    fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener> {
+        Self::Listener::bind(bind_address)
+    }
+
+    fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream> {
+        listener.accept().map(|(stream, _)| stream)
+    }
+
+    fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
+        listener.local_addr()
+    }
+}
+
+impl Server for UdpServer {
+    type Listener = UdpSocket;
+    type Stream = Vec<u8>;
+
+    fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener> {
+        Self::Listener::bind(bind_address)
+    }
+
+    fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream> {
+        let mut buffer: Vec<u8> = Vec::new();
+        listener.recv(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
+        listener.local_addr()
+    }
 }

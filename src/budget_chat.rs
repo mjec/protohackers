@@ -1,4 +1,5 @@
-use crate::{scaffolding::Context, server};
+use crate::scaffolding::Context;
+use crate::server::{Server as _, TcpServer};
 use log::{as_debug, as_display};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -31,7 +32,7 @@ struct Message {
 }
 
 pub(crate) fn run(ctx: &Context) -> Result<(), Box<dyn Error>> {
-    let shutdown_signal = server::serve(ctx, handle)?;
+    let shutdown_signal = TcpServer::new().serve(ctx, handle)?;
     shutdown_signal.set_as_ctrl_c_handler()?;
     shutdown_signal.sleep_until_shutdown();
     Ok(())
