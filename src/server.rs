@@ -259,8 +259,7 @@ impl Server for UdpServer {
 
     fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream> {
         let mut buffer: Vec<u8> = Vec::new();
-        listener.recv(&mut buffer)?;
-        Ok(buffer)
+        listener.recv(&mut buffer).map(|_| buffer)
     }
 
     fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
