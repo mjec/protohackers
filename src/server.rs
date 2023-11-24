@@ -93,18 +93,19 @@ impl Clone for ShutdownSignal {
 
 pub(crate) trait Server {
     type Listener: Send + 'static;
-    type Stream: Send + 'static;
+    type ConnectionLike: Send + 'static;
 
     fn serve(
         &self,
         ctx: &Context,
-        handler: Handler<Self::Stream>,
+        handler: Handler<Self::ConnectionLike>,
     ) -> Result<ShutdownSignal, Box<dyn Error>> {
         let active_threads = Arc::new(AtomicUsize::new(0));
         let listener = Self::get_listener(ctx.bind_address.as_str())?;
         let shutdown_signal = ShutdownSignal::new();
         let mut shutdown_signal_clone = shutdown_signal.clone();
-        let local_address = Self::get_address(&listener)?;
+        let mut shutdown_signal_clone_for_accept_and_forward_thread = shutdown_signal.clone();
+        let local_address = Self::get_local_address(&listener)?;
 
         log::info!(
             address = as_display!(local_address),
@@ -115,13 +116,40 @@ pub(crate) trait Server {
         thread::Builder::new()
             .name("server-controller".into())
             .spawn(move || {
-                let (request_sender, request_receiver) = mpsc::channel::<(Self::Stream, SocketAddr)>();
+                let (request_sender, request_receiver) = mpsc::channel::<(Self::ConnectionLike, SocketAddr)>();
                 if thread::Builder::new()
                     .name("accept-and-forward".into())
                     .spawn(move || {
-                        while let Ok(stream) = Self::get_stream(&listener) {
-                            if request_sender.send((stream, local_address)).is_err() {
-                                break;
+                        loop {
+                            match Self::pump(&listener) {
+                                Ok(pump_result) => {
+                                    if let Err(e) = request_sender.send(pump_result) {
+                                        if shutdown_signal_clone_for_accept_and_forward_thread.start_shutdown() {
+                                            log::error!(
+                                                location = "accept-and-forward thread -> pump loop -> sending connection to request receiver",
+                                                error = as_display!(e),
+                                                reason = "error sending connection to request receiver";
+                                                "Shutting down"
+                                            );
+                                        }
+                                        break;
+                                    }
+                                },
+                                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                                    log::debug!(
+                                        location = "accept-and-forward thread -> pump loop -> result of pumping the listener",
+                                        error = as_display!(e);
+                                        "std::io::ErrorKind::Interrupted received, continuing"
+                                    );
+                                }
+                                Err(e) => {
+                                    log::error!(
+                                        location = "accept-and-forward thread -> pump loop -> result of pumping the listener",
+                                        error = as_display!(e);
+                                        "Error accepting connection; exiting accept-and-forward thread"
+                                    );
+                                    break;
+                                }
                             }
                         }
                     }
@@ -211,9 +239,9 @@ pub(crate) trait Server {
 
     fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener>;
 
-    fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream>;
+    fn pump(listener: &Self::Listener) -> io::Result<(Self::ConnectionLike, SocketAddr)>;
 
-    fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr>;
+    fn get_local_address(listener: &Self::Listener) -> io::Result<SocketAddr>;
 }
 
 pub(crate) struct TcpServer();
@@ -224,7 +252,7 @@ impl TcpServer {
     }
 }
 
-pub(crate) struct UdpServer();
+pub(crate) struct UdpServer;
 
 impl UdpServer {
     pub(crate) fn new() -> Self {
@@ -234,34 +262,42 @@ impl UdpServer {
 
 impl Server for TcpServer {
     type Listener = TcpListener;
-    type Stream = TcpStream;
+    type ConnectionLike = TcpStream;
 
     fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener> {
         Self::Listener::bind(bind_address)
     }
 
-    fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream> {
-        listener.accept().map(|(stream, _)| stream)
+    fn pump(listener: &Self::Listener) -> io::Result<(Self::ConnectionLike, SocketAddr)> {
+        listener.accept()
     }
 
-    fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
+    fn get_local_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
         listener.local_addr()
     }
 }
 
 impl Server for UdpServer {
     type Listener = UdpSocket;
-    type Stream = UdpSocket;
+    type ConnectionLike = UdpSocket;
 
     fn get_listener<A: ToSocketAddrs>(bind_address: A) -> io::Result<Self::Listener> {
         Self::Listener::bind(bind_address)
     }
 
-    fn get_stream(listener: &Self::Listener) -> io::Result<Self::Stream> {
-        listener.try_clone()
+    fn pump(listener: &Self::Listener) -> io::Result<(Self::ConnectionLike, SocketAddr)> {
+        let (bytes, peer_addr) = listener.peek_from(&mut [0u8; 1])?;
+        if bytes > 0 {
+            Ok((listener.try_clone()?, peer_addr))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "No data available",
+            ))
+        }
     }
 
-    fn get_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
+    fn get_local_address(listener: &Self::Listener) -> io::Result<SocketAddr> {
         listener.local_addr()
     }
 }
