@@ -286,6 +286,12 @@ impl Server for UdpServer {
     }
 
     fn pump(listener: &Self::Listener) -> io::Result<(Self::ConnectionLike, SocketAddr)> {
+        // The docs for peek/peek_from say:
+        //      Do not use this function to implement busy waiting, instead use libc::poll to synchronize IO events on one or more sockets.
+        // However I don't want to bring in libc and deal with unsafe polling; nor deal with how to avoid draining the socket when I do poll.
+        // In particular, since we want to return (a copy of) the socket so the handler can also write to it, we can't drain it.
+        // I think actually the real victory would be to make the handler a struct that implements UdpServer, which is a trait in this world.
+        // But that's not how this application is presently designed, so I'm not going to do that either right now.
         let (bytes, peer_addr) = listener.peek_from(&mut [0u8; 1])?;
         if bytes > 0 {
             Ok((listener.try_clone()?, peer_addr))
